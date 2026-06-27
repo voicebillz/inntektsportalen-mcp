@@ -1,24 +1,66 @@
 # Inntektsportalen MCP
 
-En [MCP](https://modelcontextprotocol.io)-server som gir en AI-klient (Claude
-o.l.) **scope-styrt** tilgang til **din egen** data i Inntektsportalen.
+En [MCP](https://modelcontextprotocol.io)-server som gir en AI-klient (Claude,
+ChatGPT o.l.) **scope-styrt** tilgang til **din egen** data i Inntektsportalen.
 
-Autentisering skjer via **OAuth 2.0 (PKCE)**: første gang åpnes nettleseren der
-du logger inn (Vipps/e-post) og **godkjenner hvilke seksjoner** appen får. Du kan
-når som helst trekke tilbake tilgangen i Inntektsportalen under **Profil →
-Tilkoblinger**.
+Autentisering skjer via **OAuth 2.0 (PKCE)**: du logger inn (Vipps/e-post) og
+**godkjenner hvilke seksjoner** appen får. Du kan når som helst trekke tilbake
+tilgangen i Inntektsportalen under **Profil → Tilkoblinger**.
 
 > Sikkerheten håndheves av Inntektsportalen-backend (default-deny + scopes).
 > MCP-en kan **aldri** gjøre noe du ikke selv kan, og aldri endre 2FA/passord,
 > åpne/lukke budsjettperioder eller bruke Assistenten/Simuler.
 
-## Installasjon
+Serveren finnes i to varianter — begge bruker **samme** verktøy- og regelstruktur
+(`src/tools.js`):
+
+| Variant | Fil | Bruk |
+|---|---|---|
+| **Remote** (anbefalt) | `src/remote.js` | Lim inn en URL i Claude/ChatGPT — ingen installasjon |
+| **Lokal** (stdio) | `src/index.js` | Kjøres på din egen maskin (Claude Desktop-config) |
+
+---
+
+## 1) Remote — «lim inn URL» (anbefalt)
+
+Ingen installasjon. I klienten din legger du til en **custom connector / MCP-server**
+med URL-en:
+
+```
+https://mcp.inntektsportalen.no
+```
+
+**Claude (web/desktop):** Innstillinger → **Connectors** → **Add custom connector**
+→ lim inn URL-en → **Connect**. Et nettleservindu åpnes der du logger inn og
+godkjenner hvilke seksjoner Claude får. Ferdig.
+
+**ChatGPT:** Settings → **Connectors** (eller «Add MCP server» i den aktuelle
+flaten) → lim inn URL-en → følg innloggingen.
+
+Klienten gjør resten automatisk: den oppdager (via
+`/.well-known/oauth-protected-resource`) at Inntektsportalen er
+autorisasjonsserver, registrerer seg, og kjører OAuth/PKCE.
+
+### Hoste din egen remote-server
+
+`npm start` kjører remote-serveren (`src/remote.js`). Den er statsløs/uten
+datalagring — kun en protokoll-bro mot REST-API-et.
+
+| Miljøvariabel | Standard | Forklaring |
+|---|---|---|
+| `INNTEKTSPORTALEN_API_URL` | `https://api.inntektsportalen.no` | Backend (REST + OAuth-autorisasjonsserver) |
+| `MCP_PUBLIC_URL` | `https://mcp.inntektsportalen.no` | Denne serverens egen offentlige URL (brukes i discovery) |
+| `PORT` | `8787` | Lytteport (Railway setter denne automatisk) |
+
+Deployes typisk på Railway (`railway.json` følger med). Healthcheck: `/health`.
+
+---
+
+## 2) Lokal — stdio (Claude Desktop)
 
 ```bash
 npm install
 ```
-
-## Kjøring / oppsett i Claude
 
 Legg til i MCP-konfigurasjonen (f.eks. Claude Desktop `claude_desktop_config.json`):
 
@@ -37,15 +79,16 @@ Legg til i MCP-konfigurasjonen (f.eks. Claude Desktop `claude_desktop_config.jso
 ```
 
 Første gang et verktøy brukes, åpnes nettleseren for innlogging + samtykke.
-Tokens caches i `~/.inntektsportalen-mcp/` og fornyes automatisk.
+Tokens caches i `~/.inntektsportalen-mcp/` (filrettigheter `600`) og fornyes
+automatisk.
 
-### Miljøvariabler
-
-| Variabel | Standard | Forklaring |
+| Miljøvariabel | Standard | Forklaring |
 |---|---|---|
 | `INNTEKTSPORTALEN_API_URL` | `https://api.inntektsportalen.no` | Backend-URL |
 | `INNTEKTSPORTALEN_MCP_PORT` | `8123` | Loopback-port for OAuth-callback |
 | `INNTEKTSPORTALEN_SCOPES` | alle | Mellomrom-separert liste over scopes det bes om |
+
+---
 
 ## Scopes (tilgang)
 
@@ -76,7 +119,22 @@ validerer alltid.
 
 ## Personvern
 
-MCP-en lagrer kun OAuth-tokens lokalt (`~/.inntektsportalen-mcp/`, filrettigheter
-`600`). Ingen data sendes andre steder enn til Inntektsportalen-API-et du har
-godkjent. Trekk tilbake tilgang når som helst i Inntektsportalen → Profil →
-Tilkoblinger.
+- **Remote-serveren** lagrer ingen data og holder ingen tokens — den videresender
+  kun klientens Bearer-token til Inntektsportalen-API-et for hver forespørsel.
+- **Lokal stdio** lagrer kun OAuth-tokens lokalt (`~/.inntektsportalen-mcp/`,
+  filrettigheter `600`).
+
+Ingen data sendes andre steder enn til Inntektsportalen-API-et du har godkjent.
+Trekk tilbake tilgang når som helst i Inntektsportalen → Profil → Tilkoblinger.
+
+## Filstruktur
+
+```
+src/
+  tools.js    — verktøy-/regel-katalog (ÉN kilde til sannhet, delt)
+  api.js      — autentisert REST-klient (token injiseres)
+  scopes.js   — felles scope-liste
+  remote.js   — remote HTTP-server (Streamable HTTP + OAuth-discovery)
+  index.js    — lokal stdio-server
+  oauth.js    — lokal OAuth/PKCE-innlogging (kun stdio)
+```

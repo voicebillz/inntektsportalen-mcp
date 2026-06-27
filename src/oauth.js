@@ -10,22 +10,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
+import { SCOPES_STRING } from './scopes.js'
 
 const API = (process.env.INNTEKTSPORTALEN_API_URL || 'https://api.inntektsportalen.no').replace(/\/$/, '')
 const LOOPBACK_PORT = Number(process.env.INNTEKTSPORTALEN_MCP_PORT || 8123)
 const REDIRECT_URI = `http://127.0.0.1:${LOOPBACK_PORT}/callback`
 
 // Alle scopes MCP-en kan be om. Brukeren huker av/på i samtykke-skjermen.
-const DEFAULT_SCOPES = (process.env.INNTEKTSPORTALEN_SCOPES || [
-  'statistics:read',
-  'profile:read', 'profile:write',
-  'budget:read', 'budget:write',
-  'income:read', 'income:write',
-  'costs:read', 'costs:write',
-  'savings:read', 'savings:write',
-  'loans:read', 'loans:write',
-  'tax:read', 'sifo:read'
-].join(' '))
+const DEFAULT_SCOPES = (process.env.INNTEKTSPORTALEN_SCOPES || SCOPES_STRING)
 
 const CONFIG_DIR = path.join(os.homedir(), '.inntektsportalen-mcp')
 const TOKENS_FILE = path.join(CONFIG_DIR, 'tokens.json')
