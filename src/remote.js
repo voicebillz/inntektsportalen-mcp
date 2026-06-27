@@ -31,11 +31,21 @@ const API_BASE = (process.env.INNTEKTSPORTALEN_API_URL || 'https://api.inntektsp
 // Denne serverens egen offentlige URL (brukes i discovery-metadata).
 const PUBLIC_URL = (process.env.MCP_PUBLIC_URL || 'https://mcp.inntektsportalen.no').replace(/\/$/, '')
 const PORT = Number(process.env.PORT || 8787)
-const MCP_PATH = '/mcp'
-const RESOURCE_URL = `${PUBLIC_URL}${MCP_PATH}`
+// Vi serverer MCP på BÅDE roten og /mcp, fordi brukere limer inn base-URL-en
+// (https://mcp.inntektsportalen.no) i Claude/ChatGPT — da treffer klienten «/».
+const MCP_PATHS = ['/', '/mcp']
+const RESOURCE_URL = PUBLIC_URL
 
 const app = express()
 app.use(express.json({ limit: '4mb' }))
+
+// Lett request-logging (Railway fanger stdout) — uten sensitivt innhold.
+app.use((req, _res, next) => {
+  const hasAuth = (req.headers['authorization'] || '').startsWith('Bearer ')
+  const sid = req.headers['mcp-session-id'] || '-'
+  process.stdout.write(`[MCP] ${req.method} ${req.path} auth=${hasAuth ? 'ja' : 'nei'} sid=${sid}\n`)
+  next()
+})
 
 // CORS — MCP-klienter (inkl. nettleserbaserte) må kunne lese sesjons-headeren.
 app.use((req, res, next) => {
@@ -91,7 +101,7 @@ const bearerFrom = (req) => {
 // ---------------------------------------------------------------------
 const sessions = Object.create(null) // sessionId -> { transport, tokenHolder }
 
-app.post(MCP_PATH, async (req, res) => {
+async function mcpPost(req, res) {
   const token = bearerFrom(req)
   if (!token) return unauthorized(res)
 
@@ -117,21 +127,25 @@ app.post(MCP_PATH, async (req, res) => {
   }
 
   await entry.transport.handleRequest(req, res, req.body)
-})
+}
 
 // GET = server→klient-strøm (SSE), DELETE = avslutt sesjon.
-async function sessionRequest(req, res) {
+async function mcpSession(req, res) {
   if (!bearerFrom(req)) return unauthorized(res)
   const sessionId = req.headers['mcp-session-id']
   const entry = sessionId ? sessions[sessionId] : undefined
   if (!entry) return res.status(400).json({ error: 'Ugyldig eller manglende sesjon' })
-  const token = bearerFrom(req)
-  if (token) entry.tokenHolder.token = token
+  entry.tokenHolder.token = bearerFrom(req)
   await entry.transport.handleRequest(req, res)
 }
-app.get(MCP_PATH, sessionRequest)
-app.delete(MCP_PATH, sessionRequest)
+
+// Registrer MCP-transporten på både «/» og «/mcp».
+for (const p of MCP_PATHS) {
+  app.post(p, mcpPost)
+  app.get(p, mcpSession)
+  app.delete(p, mcpSession)
+}
 
 app.listen(PORT, () => {
-  process.stdout.write(`[Inntektsportalen MCP] remote klar på :${PORT} — ressurs ${RESOURCE_URL} (auth: ${API_BASE})\n`)
+  process.stdout.write(`[Inntektsportalen MCP] remote klar på :${PORT} — ressurs ${RESOURCE_URL} (auth: ${API_BASE}), stier ${MCP_PATHS.join(', ')}\n`)
 })
